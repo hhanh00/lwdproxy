@@ -1,0 +1,6 @@
+# script_template: "setup.iss"
+app_id: A0A30B97-4F56-4BED-94C2-357CB0F2C8BD
+display_name: lwdproxy
+create_desktop_icon: true
+locales:
+  - en
