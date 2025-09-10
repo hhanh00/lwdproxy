@@ -6,5 +6,5 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-String greet({required String name}) =>
-    RustLib.instance.api.crateApiSimpleGreet(name: name);
+Future<String> deriveKey({required int idx}) =>
+    RustLib.instance.api.crateApiKeyDeriveKey(idx: idx);

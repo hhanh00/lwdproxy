@@ -1,0 +1,9 @@
+use serde::Deserialize;
+
+#[derive(Clone, Deserialize, Debug, Default)]
+pub struct Config {
+    pub db_path: String,
+    pub origin: Vec<String>,
+    pub bind_address: String,
+    pub port: u16,
+}
