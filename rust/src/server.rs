@@ -2,14 +2,12 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use flutter_rust_bridge::frb;
-use heed::{
-    byteorder::BE,
-    types::*,
-    Database, Env, EnvOpenOptions,
-};
+use heed::{byteorder::BE, types::*, Database, Env, EnvOpenOptions};
 use prost::Message;
-use tokio::sync::Mutex;
+use tokio::{
+    sync::{mpsc, Mutex},
+    task::LocalSet,
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{
     transport::{Channel, ClientTlsConfig, Endpoint, Server},
@@ -27,6 +25,24 @@ use crate::{
     },
     Client,
 };
+
+macro_rules! env {
+    ($self:ident) => {{
+        let state = $self.state.lock().await;
+        state.env.clone()
+    }};
+}
+
+macro_rules! rtxn {
+    ($env:ident) => {{
+        let rtxn = $env.read_txn().map_err(into_status)?;
+        let blocks_table: Database<U32<BE>, Bytes> = $env
+            .open_database(&rtxn, None)
+            .map_err(into_status)?
+            .unwrap();
+        (blocks_table, rtxn)
+    }};
+}
 
 pub struct LightwalletDState {
     pub network: Network,
@@ -68,13 +84,66 @@ impl LightwalletDState {
 
 pub struct LightwalletD {
     pub state: Arc<Mutex<LightwalletDState>>,
+    pub tx_job: mpsc::Sender<RangeJob>,
 }
 
 impl LightwalletD {
     pub async fn new() -> Result<Self> {
+        const CONCURRENT_RANGE_JOBS: usize = 16;
+
         let state = LightwalletDState::new().await?;
+        let mut tx_child_jobs = vec![];
+        for i in 0..CONCURRENT_RANGE_JOBS {
+            let (tx_child_job, mut rx_child_job) = mpsc::channel::<RangeJob>(4);
+            // dedicated ROTxn worker thread because LMDB read txns are not Send
+            // We cannot send the CompactBlock results back to the grpc worker thread
+            // The tonic grpc worker thread may be busy waiting for the client to receive
+            // and yielding to other grpc requests
+            // there is an await point between each block send
+            // We use a thread pool because otherwise we wouldn't be able to process
+            // multiple GetBlockRange concurrently
+            std::thread::spawn(move || {
+                let local = LocalSet::new();
+                tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap()
+                    .block_on(local.run_until(async move {
+                        while let Some(job) = rx_child_job.recv().await {
+                            let RangeJob {
+                                env,
+                                start,
+                                end,
+                                tx,
+                            } = job;
+                            let (blocks_table, rtxn) = rtxn!(env);
+                            let blocks = blocks_table.range(&rtxn, &(start..=end))?;
+                            for block in blocks {
+                                let (h, data) = block?;
+                                let block = CompactBlock::decode(data)?;
+                                let _ = tx.send(Ok(block)).await;
+                            }
+                        }
+                        info!("Range job worker stopped");
+                        Ok::<_, anyhow::Error>(())
+                    }))
+                    .unwrap();
+            });
+            tx_child_jobs.push(tx_child_job);
+        }
+        let (tx_job, mut rx_job) = mpsc::channel::<RangeJob>(CONCURRENT_RANGE_JOBS);
+        tokio::spawn(async move {
+            let mut i = 0;
+            while let Some(job) = rx_job.recv().await {
+                let tx_child_job = &tx_child_jobs[i % tx_child_jobs.len()];
+                let _ = tx_child_job.send(job).await;
+                i += 1;
+            }
+            Ok::<_, anyhow::Error>(())
+        });
+
         Ok(Self {
             state: Arc::new(Mutex::new(state)),
+            tx_job,
         })
     }
 
@@ -154,7 +223,7 @@ impl LightwalletD {
                     }
                 }
                 _ = report_timer.tick() => {
-                    info!("Commit @{h}");
+                    info!("Checkpoint @{h}");
                     wtxn.commit()?;
                     wtxn = state.env.write_txn()?;
                 }
@@ -168,15 +237,48 @@ impl LightwalletD {
 
 pub type GRPCResult<T> = Result<T, Status>;
 
+fn into_status(e: impl std::error::Error) -> Status {
+    Status::internal(e.to_string())
+}
+
+pub struct RangeJob {
+    env: Env,
+    start: u32,
+    end: u32,
+    tx: mpsc::Sender<GRPCResult<CompactBlock>>,
+}
+
 #[tonic::async_trait]
 impl CompactTxStreamer for LightwalletD {
     /// Return the height of the tip of the best chain
     async fn get_latest_block(&self, request: Request<ChainSpec>) -> GRPCResult<Response<BlockId>> {
-        todo!()
+        let env = env!(self);
+        let (blocks_table, rtxn) = rtxn!(env);
+        let last_block = blocks_table
+            .last(&rtxn)
+            .map_err(into_status)?
+            .map(|(h, data)| {
+                // Decode the block to get its hash (cannot fail as it was encoded before storing)
+                let block = CompactBlock::decode(data).map_err(into_status).unwrap();
+                BlockId {
+                    height: h as u64,
+                    hash: block.hash.clone(),
+                }
+            })
+            .unwrap_or_default();
+        Ok(Response::new(last_block))
     }
     /// Return the compact block corresponding to the given block identifier
     async fn get_block(&self, request: Request<BlockId>) -> GRPCResult<Response<CompactBlock>> {
-        todo!()
+        let request = request.into_inner();
+        let env = env!(self);
+        let (blocks_table, rtxn) = rtxn!(env);
+        let block_data = blocks_table
+            .get(&rtxn, &(request.height as u32))
+            .map_err(into_status)?;
+        let block_data = block_data.ok_or_else(|| Status::not_found("Block not found"))?;
+        let block = CompactBlock::decode(block_data).unwrap();
+        Ok(Response::new(block))
     }
     /// Server streaming response type for the GetBlockRange method.
     type GetBlockRangeStream = ReceiverStream<GRPCResult<CompactBlock>>;
@@ -186,7 +288,31 @@ impl CompactTxStreamer for LightwalletD {
         &self,
         request: Request<BlockRange>,
     ) -> GRPCResult<Response<Self::GetBlockRangeStream>> {
-        todo!()
+        let request = request.into_inner();
+        let start = request
+            .start
+            .ok_or_else(|| Status::invalid_argument("Start block is required"))?;
+        let end = request
+            .end
+            .ok_or_else(|| Status::invalid_argument("End block is required"))?;
+        let start = start.height as u32;
+        let end = end.height as u32;
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<GRPCResult<CompactBlock>>(4);
+        let env = env!(self);
+        let tx_job = self.tx_job.clone();
+        tokio::spawn(async move {
+            let job = RangeJob {
+                env,
+                start,
+                end,
+                tx,
+            };
+            let _ = tx_job.send(job).await;
+            Ok::<_, anyhow::Error>(())
+        });
+        let recv = ReceiverStream::new(rx);
+        Ok(Response::new(recv))
     }
     /// Return the requested full (not compact) transaction (as from zcashd)
     async fn get_transaction(
@@ -285,7 +411,6 @@ impl CompactTxStreamer for LightwalletD {
     }
 }
 
-#[frb]
 pub async fn start_server() -> Result<()> {
     let c = config();
     let addr = format!("{}:{}", c.bind_address, c.port).parse()?;
@@ -294,9 +419,14 @@ pub async fn start_server() -> Result<()> {
 
     info!("GreeterServer listening on {}", addr);
 
-    Server::builder()
-        .add_service(CompactTxStreamerServer::new(lwd))
-        .serve(addr)
+    let local = LocalSet::new();
+    local
+        .run_until(async move {
+            Server::builder()
+                .add_service(CompactTxStreamerServer::new(lwd))
+                .serve(addr)
+                .await
+        })
         .await?;
 
     Ok(())
