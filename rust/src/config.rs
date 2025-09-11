@@ -6,4 +6,5 @@ pub struct Config {
     pub origin: Vec<String>,
     pub bind_address: String,
     pub port: u16,
+    pub min_height: u32,
 }

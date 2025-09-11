@@ -11,17 +11,23 @@ class Config {
   final List<String> origin;
   final String bindAddress;
   final int port;
+  final int minHeight;
 
   const Config({
     required this.dbPath,
     required this.origin,
     required this.bindAddress,
     required this.port,
+    required this.minHeight,
   });
 
   @override
   int get hashCode =>
-      dbPath.hashCode ^ origin.hashCode ^ bindAddress.hashCode ^ port.hashCode;
+      dbPath.hashCode ^
+      origin.hashCode ^
+      bindAddress.hashCode ^
+      port.hashCode ^
+      minHeight.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -31,5 +37,6 @@ class Config {
           dbPath == other.dbPath &&
           origin == other.origin &&
           bindAddress == other.bindAddress &&
-          port == other.port;
+          port == other.port &&
+          minHeight == other.minHeight;
 }

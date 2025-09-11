@@ -246,11 +246,13 @@ impl SseDecode for crate::config::Config {
         let mut var_origin = <Vec<String>>::sse_decode(deserializer);
         let mut var_bindAddress = <String>::sse_decode(deserializer);
         let mut var_port = <u16>::sse_decode(deserializer);
+        let mut var_minHeight = <u32>::sse_decode(deserializer);
         return crate::config::Config {
             db_path: var_dbPath,
             origin: var_origin,
             bind_address: var_bindAddress,
             port: var_port,
+            min_height: var_minHeight,
         };
     }
 }
@@ -359,6 +361,7 @@ impl flutter_rust_bridge::IntoDart for crate::config::Config {
             self.origin.into_into_dart().into_dart(),
             self.bind_address.into_into_dart().into_dart(),
             self.port.into_into_dart().into_dart(),
+            self.min_height.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -391,6 +394,7 @@ impl SseEncode for crate::config::Config {
         <Vec<String>>::sse_encode(self.origin, serializer);
         <String>::sse_encode(self.bind_address, serializer);
         <u16>::sse_encode(self.port, serializer);
+        <u32>::sse_encode(self.min_height, serializer);
     }
 }
 
