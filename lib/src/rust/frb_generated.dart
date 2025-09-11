@@ -259,13 +259,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Config dco_decode_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return Config(
       dbPath: dco_decode_String(arr[0]),
       origin: dco_decode_list_String(arr[1]),
       bindAddress: dco_decode_String(arr[2]),
       port: dco_decode_u_16(arr[3]),
+      minHeight: dco_decode_u_32(arr[4]),
     );
   }
 
@@ -332,11 +333,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_origin = sse_decode_list_String(deserializer);
     var var_bindAddress = sse_decode_String(deserializer);
     var var_port = sse_decode_u_16(deserializer);
+    var var_minHeight = sse_decode_u_32(deserializer);
     return Config(
       dbPath: var_dbPath,
       origin: var_origin,
       bindAddress: var_bindAddress,
       port: var_port,
+      minHeight: var_minHeight,
     );
   }
 
@@ -422,6 +425,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_String(self.origin, serializer);
     sse_encode_String(self.bindAddress, serializer);
     sse_encode_u_16(self.port, serializer);
+    sse_encode_u_32(self.minHeight, serializer);
   }
 
   @protected

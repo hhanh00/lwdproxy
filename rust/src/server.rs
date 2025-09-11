@@ -154,6 +154,7 @@ impl LightwalletD {
     }
 
     pub async fn sync(&self) -> Result<()> {
+        let min_height = config().min_height;
         let network = {
             let state = self.state.lock().await;
             state.network
@@ -174,10 +175,11 @@ impl LightwalletD {
                 .last(&rtxn)?
                 .map(|(h, _)| h + 1)
                 .unwrap_or_else(|| {
-                    network
+                    let activation_height: u32 = network
                         .activation_height(NetworkUpgrade::Sapling)
                         .unwrap()
-                        .into()
+                        .into();
+                    activation_height.max(min_height)
                 });
             max_height
         };
@@ -246,6 +248,32 @@ pub struct RangeJob {
     start: u32,
     end: u32,
     tx: mpsc::Sender<GRPCResult<CompactBlock>>,
+}
+
+pub async fn forward<T, R>(
+    lwd: &LightwalletD,
+    request: Request<T>,
+    f: impl AsyncFnOnce(Client, Request<T>) -> Result<Response<R>>,
+) -> GRPCResult<Response<R>> {
+    let r = async {
+        let client = lwd.client().await?;
+        let tx = f(client, request).await?;
+        Ok::<_, anyhow::Error>(tx)
+    };
+    r.await.map_err(|e| into_status(e.root_cause()))
+}
+
+macro_rules! forward {
+    ($self:ident, $request:ident, $method:ident) => {{
+        forward(
+            $self,
+            $request,
+            async |mut client, request| {
+                let result = client.$method(request).await?;
+                Ok::<_, anyhow::Error>(result)
+            },
+        ).await
+    }};
 }
 
 #[tonic::async_trait]
@@ -319,14 +347,14 @@ impl CompactTxStreamer for LightwalletD {
         &self,
         request: Request<TxFilter>,
     ) -> GRPCResult<Response<RawTransaction>> {
-        todo!()
+        forward!(self, request, get_transaction)
     }
     /// Submit the given transaction to the Zcash network
     async fn send_transaction(
         &self,
         request: Request<RawTransaction>,
     ) -> GRPCResult<Response<SendResponse>> {
-        todo!()
+        forward!(self, request, send_transaction)
     }
     /// Server streaming response type for the GetTaddressTxids method.
     type GetTaddressTxidsStream = ReceiverStream<GRPCResult<RawTransaction>>;
@@ -342,7 +370,7 @@ impl CompactTxStreamer for LightwalletD {
         &self,
         request: Request<AddressList>,
     ) -> GRPCResult<Response<Balance>> {
-        todo!()
+        forward!(self, request, get_taddress_balance)
     }
     async fn get_taddress_balance_stream(
         &self,
@@ -384,13 +412,13 @@ impl CompactTxStreamer for LightwalletD {
     /// values also (even though they can be obtained using GetBlock).
     /// The block can be specified by either height or hash.
     async fn get_tree_state(&self, request: Request<BlockId>) -> GRPCResult<Response<TreeState>> {
-        todo!()
+        forward!(self, request, get_tree_state)
     }
     async fn get_address_utxos(
         &self,
         request: Request<GetAddressUtxosArg>,
     ) -> GRPCResult<Response<GetAddressUtxosReplyList>> {
-        todo!()
+        forward!(self, request, get_address_utxos)
     }
     /// Server streaming response type for the GetAddressUtxosStream method.
     type GetAddressUtxosStreamStream = ReceiverStream<GRPCResult<GetAddressUtxosReply>>;
