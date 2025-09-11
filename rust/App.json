@@ -3,5 +3,5 @@
     "origin": ["https://zec.rocks"],
     "bind_address": "0.0.0.0",
     "port": 9067,
-    "min_height": 3000000
+    "min_height": 2100000
 }
