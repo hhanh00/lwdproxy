@@ -37,6 +37,7 @@ rustls = "0.23.31"
 tokio-stream = "0.1.17"
 figment = { version = "0.10.19", features = ["json"] }
 heed = "0.22.0"
+futures-util = "0.3.31"
 
 [patch.crates-io]
 orchard = { git = "https://github.com/hhanh00/orchard.git", rev = "75448e671f56f7c6d3f29502f5a26370a056b86c" }

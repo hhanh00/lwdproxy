@@ -2,19 +2,20 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use futures_util::TryStreamExt as _;
 use heed::{byteorder::BE, types::*, Database, Env, EnvOpenOptions};
 use prost::Message;
 use tokio::{
     sync::{mpsc, Mutex},
     task::LocalSet,
 };
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{wrappers::ReceiverStream, StreamExt as _};
 use tonic::{
     transport::{Channel, ClientTlsConfig, Endpoint, Server},
-    Request, Response, Status,
+    Request, Response, Status, Streaming,
 };
 use tracing::info;
-use zcash_protocol::consensus::{Network, NetworkUpgrade, Parameters};
+use zcash_protocol::consensus::{BranchId, Network, NetworkUpgrade, Parameters};
 
 use crate::{
     api::init::config,
@@ -265,14 +266,39 @@ pub async fn forward<T, R>(
 
 macro_rules! forward {
     ($self:ident, $request:ident, $method:ident) => {{
-        forward(
-            $self,
-            $request,
-            async |mut client, request| {
-                let result = client.$method(request).await?;
-                Ok::<_, anyhow::Error>(result)
-            },
-        ).await
+        forward($self, $request, async |mut client, request| {
+            let result = client.$method(request).await?;
+            Ok::<_, anyhow::Error>(result)
+        })
+        .await
+    }};
+}
+
+pub async fn forward_stream<T, R>(
+    lwd: &LightwalletD,
+    request: Request<T>,
+    f: impl AsyncFnOnce(Client, Request<T>) -> Result<Response<Streaming<R>>>,
+) -> GRPCResult<Response<ReceiverStream<GRPCResult<R>>>> {
+    let rx = async move {
+        let (tx, rx) = tokio::sync::mpsc::channel::<GRPCResult<R>>(4);
+        let client = lwd.client().await?;
+        let mut rep = f(client, request).await?.into_inner();
+        while let Some(rtx) = rep.message().await? {
+            let _ = tx.send(Ok(rtx)).await;
+        }
+        Ok::<_, anyhow::Error>(rx)
+    };
+    let rx = rx.await.map_err(|e| into_status(e.root_cause()))?;
+    Ok(Response::new(ReceiverStream::new(rx)))
+}
+
+macro_rules! forward_stream {
+    ($self:ident, $request:ident, $method:ident) => {{
+        forward_stream($self, $request, async |mut client, request| {
+            let result = client.$method(request).await?;
+            Ok::<_, anyhow::Error>(result)
+        })
+        .await
     }};
 }
 
@@ -364,7 +390,7 @@ impl CompactTxStreamer for LightwalletD {
         &self,
         request: Request<TransparentAddressBlockFilter>,
     ) -> GRPCResult<Response<Self::GetTaddressTxidsStream>> {
-        todo!()
+        forward_stream!(self, request, get_taddress_txids)
     }
     async fn get_taddress_balance(
         &self,
@@ -376,25 +402,31 @@ impl CompactTxStreamer for LightwalletD {
         &self,
         request: Request<tonic::Streaming<Address>>,
     ) -> GRPCResult<Response<Balance>> {
-        todo!()
+        let request = request.into_inner();
+        let request: Vec<_> = request.try_collect().await?;
+        let request = tokio_stream::iter(request);
+        let req = Request::new(request);
+        let mut client = self.client().await.map_err(|e| Status::internal(e.to_string()))?;
+        let rep = client.get_taddress_balance_stream(req).await?;
+        Ok(rep)
     }
     /// Server streaming response type for the GetMempoolTx method.
     type GetMempoolTxStream = ReceiverStream<GRPCResult<CompactTx>>;
 
-    /// Return the compact transactions currently in the mempool{ todo!() } the GRPCResults
+    /// Return the compact transactions currently in the mempool the GRPCResults
     /// can be a few seconds out of date. If the Exclude list is empty, return
-    /// all transactions{ todo!() } otherwise return all *except* those in the Exclude list
-    /// (if any){ todo!() } this allows the client to avoid receiving transactions that it
+    /// all transactions otherwise return all *except* those in the Exclude list
+    /// (if any) this allows the client to avoid receiving transactions that it
     /// already has (from an earlier call to this rpc). The transaction IDs in the
     /// Exclude list can be shortened to any number of bytes to make the request
-    /// more bandwidth-efficient{ todo!() } if two or more transactions in the mempool
+    /// more bandwidth-efficient if two or more transactions in the mempool
     /// match a shortened txid, they are all sent (none is excluded). Transactions
     /// in the exclude list that don't exist in the mempool are ignored.
     async fn get_mempool_tx(
         &self,
         request: Request<Exclude>,
     ) -> GRPCResult<Response<Self::GetMempoolTxStream>> {
-        todo!()
+        forward_stream!(self, request, get_mempool_tx)
     }
     /// Server streaming response type for the GetMempoolStream method.
     type GetMempoolStreamStream = ReceiverStream<GRPCResult<RawTransaction>>;
@@ -405,7 +437,7 @@ impl CompactTxStreamer for LightwalletD {
         &self,
         request: Request<Empty>,
     ) -> GRPCResult<Response<Self::GetMempoolStreamStream>> {
-        todo!()
+        forward_stream!(self, request, get_mempool_stream)
     }
     /// GetTreeState returns the note commitment tree state corresponding to the given block.
     /// See section 3.7 of the Zcash protocol specification. It returns several other useful
@@ -427,15 +459,43 @@ impl CompactTxStreamer for LightwalletD {
         &self,
         request: Request<GetAddressUtxosArg>,
     ) -> GRPCResult<Response<Self::GetAddressUtxosStreamStream>> {
-        todo!()
+        forward_stream!(self, request, get_address_utxos_stream)
     }
     /// Return information about this lightwalletd instance and the blockchain
     async fn get_lightd_info(&self, request: Request<Empty>) -> GRPCResult<Response<LightdInfo>> {
-        todo!()
+        let sapling_activation_height: u64 = Network::MainNetwork
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap()
+            .into();
+        let consensus_branch_id: u32 = BranchId::Nu6.into();
+        let env = env!(self);
+        let (blocks_table, rtxn) = rtxn!(env);
+        let latest_height = blocks_table
+            .last(&rtxn)
+            .map_err(into_status)?
+            .map(|(h, _)| h)
+            .unwrap_or_default();
+        let info = LightdInfo {
+            version: "LWD Proxy 1.0.0".to_string(),
+            vendor: "hanh".to_string(),
+            taddr_support: true,
+            chain_name: "main".to_string(),
+            sapling_activation_height,
+            consensus_branch_id: hex::encode(consensus_branch_id.to_le_bytes()),
+            block_height: latest_height as u64,
+            git_commit: "".to_string(),
+            branch: "".to_string(),
+            estimated_height: latest_height as u64,
+            build_date: "".to_string(),
+            build_user: "".to_string(),
+            zcashd_build: "".to_string(),
+            zcashd_subversion: "".to_string(),
+        };
+        Ok(Response::new(info))
     }
     /// Testing-only, requires lightwalletd --ping-very-insecure (do not enable in production)
     async fn ping(&self, request: Request<Duration>) -> GRPCResult<Response<PingResponse>> {
-        todo!()
+        Ok(Response::new(PingResponse { entry: 0, exit: 0 }))
     }
 }
 
