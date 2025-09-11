@@ -11,7 +11,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{
-    transport::{Channel, ClientTlsConfig, Endpoint, Server},
+    transport::{Channel, ClientTlsConfig, Endpoint, Identity, Server, ServerTlsConfig},
     Request, Response, Status, Streaming,
 };
 use tracing::info;
@@ -546,6 +546,13 @@ impl CompactTxStreamer for LightwalletD {
 
 pub async fn start_server() -> Result<()> {
     let c = config();
+    let cert_path = &c.cert_path;
+    let key_path = &c.key_path;
+    let cert = tokio::fs::read(cert_path).await?;
+    let key = tokio::fs::read(key_path).await?;
+    let identity = Identity::from_pem(cert, key);
+    let tls_config = ServerTlsConfig::new().identity(identity);
+
     let addr = format!("{}:{}", c.bind_address, c.port).parse()?;
     let lwd = LightwalletD::build().await?;
 
@@ -555,6 +562,7 @@ pub async fn start_server() -> Result<()> {
     local
         .run_until(async move {
             Server::builder()
+                .tls_config(tls_config)?
                 .add_service(CompactTxStreamerServer::new(lwd))
                 .serve(addr)
                 .await
