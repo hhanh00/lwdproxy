@@ -24,7 +24,7 @@ use crate::{
         compact_tx_streamer_server::{CompactTxStreamer, CompactTxStreamerServer},
         *,
     },
-    Client,
+    Client, SyncError,
 };
 
 macro_rules! env {
@@ -83,7 +83,19 @@ impl LightwalletDState {
         Ok(state)
     }
 
-    pub async fn sync(&self) -> Result<()> {
+    pub async fn rewind(&self) -> Result<()> {
+        let mut wtxn = self.env.write_txn()?;
+        let blocks_table: Database<U32<BE>, Bytes> = self.env.create_database(&mut wtxn, None)?;
+        if let Some((last, _)) = blocks_table.last(&mut wtxn)? {
+            // drop last 100 blocks, a reorg will never be longer than that
+            let height = last.saturating_sub(100);
+            blocks_table.delete_range(&mut wtxn, &(height..=last))?;
+        }
+        wtxn.commit()?;
+        Ok(())
+    }
+
+    pub async fn sync(&self) -> Result<(), SyncError> {
         let min_height = config().min_height;
         let network = self.network;
         let mut client = CompactTxStreamerClient::new(self.channel.clone());
@@ -92,27 +104,31 @@ impl LightwalletDState {
             .await?
             .into_inner();
         let end = id.height as u32;
-        let start = {
+        let (start, mut prevhash) = {
             let rtxn = self.env.read_txn()?;
             let blocks_table: Database<U32<BE>, Bytes> =
                 self.env.open_database(&rtxn, None)?.unwrap();
-            let max_height = blocks_table
+            let (max_height, data) = blocks_table
                 .last(&rtxn)?
-                .map(|(h, _)| h + 1)
+                .map(|(h, hash)| (h + 1, Some(hash.to_vec())))
                 .unwrap_or_else(|| {
                     let activation_height: u32 = network
                         .activation_height(NetworkUpgrade::Sapling)
                         .unwrap()
                         .into();
-                    activation_height.max(min_height)
+                    (activation_height.max(min_height), None)
                 });
-            max_height
+            let prevhash = data.map(|d| {
+                let block = CompactBlock::decode(&*d).unwrap();
+                block.hash
+            });
+            (max_height, prevhash)
         };
 
         if start > end {
             return Ok(());
         }
-        info!("{start} {end}");
+        info!("Processing from {start} to {end}");
 
         let range = BlockRange {
             start: Some(BlockId {
@@ -140,6 +156,14 @@ impl LightwalletDState {
                 block = blocks.message() => {
                     if let Some(block) = block? {
                         h = block.height as u32;
+                        let block_prevhash = block.prev_hash.clone();
+                        if let Some(prevhash) = &prevhash {
+                            if *prevhash != block_prevhash {
+                                info!("REORG {h} exp {}, got {}", hex::encode(prevhash), hex::encode(block_prevhash));
+                                return Err(SyncError::Reorg);
+                            }
+                        }
+                        prevhash = Some(block.hash.clone());
                         if h % 100_000 == 0 { info!("Syncing block @{h}"); }
                         blocks_table.put(&mut wtxn, &h, block.encode_to_vec().as_slice())?;
                     }
@@ -155,6 +179,7 @@ impl LightwalletDState {
             }
         }
         wtxn.commit()?;
+        info!("Checkpoint @{h}");
 
         Ok(())
     }
@@ -164,7 +189,16 @@ impl LightwalletDState {
         tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
             loop {
                 let runtime = Builder::new_current_thread().enable_time().build().unwrap();
-                runtime.block_on(state.sync())?;
+                runtime.block_on(async {
+                    let result = state.sync().await;
+                    match result {
+                        Ok(r) => Ok(()),
+                        Err(SyncError::Reorg) => state.rewind().await,
+                        Err(SyncError::Db(e)) => Err(anyhow::Error::new(e)),
+                        Err(SyncError::Tonic(e)) => Err(anyhow::Error::new(e)),
+                        Err(SyncError::Other(e)) => Err(e),
+                    }
+                })?;
                 std::thread::sleep(std::time::Duration::from_secs(15));
             }
         });
@@ -178,7 +212,7 @@ pub struct LightwalletD {
 }
 
 impl LightwalletD {
-    pub async fn new() -> Result<Self> {
+    pub async fn build() -> Result<Self> {
         const CONCURRENT_RANGE_JOBS: usize = 16;
 
         let state = LightwalletDState::new().await?;
@@ -231,7 +265,7 @@ impl LightwalletD {
             Ok::<_, anyhow::Error>(())
         });
 
-        state.run()?;
+        state.run()?; // Run the autosync task
 
         Ok(Self {
             state: Mutex::new(state),
@@ -243,14 +277,6 @@ impl LightwalletD {
         let state = self.state.lock().await;
         let client = CompactTxStreamerClient::new(state.channel.clone());
         Ok(client)
-    }
-
-    pub async fn sync(&self) -> Result<()> {
-        let state = {
-            let state = self.state.lock().await;
-            (*state).clone()
-        };
-        state.sync().await
     }
 }
 
@@ -521,7 +547,7 @@ impl CompactTxStreamer for LightwalletD {
 pub async fn start_server() -> Result<()> {
     let c = config();
     let addr = format!("{}:{}", c.bind_address, c.port).parse()?;
-    let lwd = LightwalletD::new().await?;
+    let lwd = LightwalletD::build().await?;
 
     info!("GreeterServer listening on {}", addr);
 
@@ -536,78 +562,4 @@ pub async fn start_server() -> Result<()> {
         .await?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    // use super::*;
-    // use heed::{
-    //     byteorder::LE,
-    //     types::{Bytes, U32},
-    //     Database, EnvOpenOptions,
-    // };
-    // use sqlx::{
-    //     sqlite::{SqliteConnectOptions, SqliteRow},
-    //     Row, SqlitePool,
-    // };
-    // use tokio_stream::StreamExt;
-
-    #[tokio::test]
-    async fn migrate() -> anyhow::Result<()> {
-        // let lwd = LightwalletD::new().await?;
-        // lwd.sync().await?;
-
-        // let blocks_table: TableDefinition<u32, &[u8]> = TableDefinition::new("blocks");
-        // let odb = Database::create("zec.redb")?;
-        // let wtxn = odb.begin_write()?;
-        // let mut blocks = wtxn.open_table(blocks_table)?;
-        // let options = SqliteConnectOptions::new().filename("lwd.db");
-        // let idb = SqlitePool::connect_with(options).await?;
-        // let mut idb = idb.acquire().await?;
-        // let mut data = sqlx::query("SELECT height, block FROM compact_blocks ORDER BY height")
-        // .map(|r: SqliteRow| {
-        //     let height: u32 = r.get(0);
-        //     let block: Vec<u8> = r.get(1);
-        //     (height, block)
-        // })
-        // .fetch(&mut *idb);
-
-        // while let Some(data) = data.next().await {
-        //     let (height, block) = data?;
-        //     if height % 10000 == 0 {
-        //         println!("{height}");
-        //     }
-        //     blocks.insert(height, &block.as_slice())?;
-        // }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn migrate2() -> anyhow::Result<()> {
-        // let env = unsafe { EnvOpenOptions::new()
-        //     .map_size(20*1024*1024*1024)
-        //     .open("zec.mdb")? };
-        // let mut wtxn = env.write_txn()?;
-        // let blocks_table: Database<U32<BE>, Bytes> = env.create_database(&mut wtxn, None)?;
-        // let options = SqliteConnectOptions::new().filename("/Volumes/External2TB/lwd.db");
-        // let idb = SqlitePool::connect_with(options).await?;
-        // let mut idb = idb.acquire().await?;
-        // let mut data = sqlx::query("SELECT height, block FROM compact_blocks ORDER BY height")
-        // .map(|r: SqliteRow| {
-        //     let height: u32 = r.get(0);
-        //     let block: Vec<u8> = r.get(1);
-        //     (height, block)
-        // })
-        // .fetch(&mut *idb);
-
-        // while let Some(data) = data.next().await {
-        //     let (height, block) = data?;
-        //     if height % 10000 == 0 {
-        //         println!("{height}");
-        //     }
-        //     blocks_table.put(&mut wtxn, &height, &block.as_slice())?;
-        // }
-        // wtxn.commit()?;
-        Ok(())
-    }
 }
