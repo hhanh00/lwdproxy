@@ -1,15 +1,15 @@
 #![allow(unused_variables)]
-use std::sync::Arc;
 
 use anyhow::Result;
 use futures_util::TryStreamExt as _;
 use heed::{byteorder::BE, types::*, Database, Env, EnvOpenOptions};
 use prost::Message;
 use tokio::{
+    runtime::Builder,
     sync::{mpsc, Mutex},
     task::LocalSet,
 };
-use tokio_stream::{wrappers::ReceiverStream, StreamExt as _};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{
     transport::{Channel, ClientTlsConfig, Endpoint, Server},
     Request, Response, Status, Streaming,
@@ -45,6 +45,7 @@ macro_rules! rtxn {
     }};
 }
 
+#[derive(Clone)]
 pub struct LightwalletDState {
     pub network: Network,
     pub env: Env,
@@ -81,10 +82,98 @@ impl LightwalletDState {
         };
         Ok(state)
     }
+
+    pub async fn sync(&self) -> Result<()> {
+        let min_height = config().min_height;
+        let network = self.network;
+        let mut client = CompactTxStreamerClient::new(self.channel.clone());
+        let id = client
+            .get_latest_block(Request::new(ChainSpec {}))
+            .await?
+            .into_inner();
+        let end = id.height as u32;
+        let start = {
+            let rtxn = self.env.read_txn()?;
+            let blocks_table: Database<U32<BE>, Bytes> =
+                self.env.open_database(&rtxn, None)?.unwrap();
+            let max_height = blocks_table
+                .last(&rtxn)?
+                .map(|(h, _)| h + 1)
+                .unwrap_or_else(|| {
+                    let activation_height: u32 = network
+                        .activation_height(NetworkUpgrade::Sapling)
+                        .unwrap()
+                        .into();
+                    activation_height.max(min_height)
+                });
+            max_height
+        };
+
+        if start > end {
+            return Ok(());
+        }
+        info!("{start} {end}");
+
+        let range = BlockRange {
+            start: Some(BlockId {
+                height: start as u64,
+                hash: vec![],
+            }),
+            end: Some(BlockId {
+                height: end as u64,
+                hash: vec![],
+            }),
+            spam_filter_threshold: 0,
+        };
+        let mut report_timer = tokio::time::interval(std::time::Duration::from_secs(15));
+
+        let mut blocks = client
+            .get_block_range(Request::new(range))
+            .await?
+            .into_inner();
+        let mut h = 0u32;
+        let mut wtxn = self.env.write_txn()?;
+        // Database can outlive the wtxn in lmdb
+        let blocks_table: Database<U32<BE>, Bytes> = self.env.create_database(&mut wtxn, None)?;
+        loop {
+            tokio::select! {
+                block = blocks.message() => {
+                    if let Some(block) = block? {
+                        h = block.height as u32;
+                        if h % 100_000 == 0 { info!("Syncing block @{h}"); }
+                        blocks_table.put(&mut wtxn, &h, block.encode_to_vec().as_slice())?;
+                    }
+                    else {
+                        break;
+                    }
+                }
+                _ = report_timer.tick() => {
+                    info!("Checkpoint @{h}");
+                    wtxn.commit()?;
+                    wtxn = self.env.write_txn()?;
+                }
+            }
+        }
+        wtxn.commit()?;
+
+        Ok(())
+    }
+
+    pub fn run(&self) -> Result<()> {
+        let state = self.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
+            loop {
+                let runtime = Builder::new_current_thread().enable_time().build().unwrap();
+                runtime.block_on(state.sync())?;
+                std::thread::sleep(std::time::Duration::from_secs(15));
+            }
+        });
+        Ok(())
+    }
 }
 
 pub struct LightwalletD {
-    pub state: Arc<Mutex<LightwalletDState>>,
+    pub state: Mutex<LightwalletDState>,
     pub tx_job: mpsc::Sender<RangeJob>,
 }
 
@@ -142,8 +231,10 @@ impl LightwalletD {
             Ok::<_, anyhow::Error>(())
         });
 
+        state.run()?;
+
         Ok(Self {
-            state: Arc::new(Mutex::new(state)),
+            state: Mutex::new(state),
             tx_job,
         })
     }
@@ -155,86 +246,11 @@ impl LightwalletD {
     }
 
     pub async fn sync(&self) -> Result<()> {
-        let min_height = config().min_height;
-        let network = {
+        let state = {
             let state = self.state.lock().await;
-            state.network
+            (*state).clone()
         };
-        info!("Network: {:?}", network);
-        let mut client = self.client().await?;
-        let id = client
-            .get_latest_block(Request::new(ChainSpec {}))
-            .await?
-            .into_inner();
-        let end = id.height as u32;
-        let start = {
-            let state = self.state.lock().await;
-            let rtxn = state.env.read_txn()?;
-            let blocks_table: Database<U32<BE>, Bytes> =
-                state.env.open_database(&rtxn, None)?.unwrap();
-            let max_height = blocks_table
-                .last(&rtxn)?
-                .map(|(h, _)| h + 1)
-                .unwrap_or_else(|| {
-                    let activation_height: u32 = network
-                        .activation_height(NetworkUpgrade::Sapling)
-                        .unwrap()
-                        .into();
-                    activation_height.max(min_height)
-                });
-            max_height
-        };
-
-        info!("{start} {end}");
-        if start > end {
-            info!("Database is up to date");
-            return Ok(());
-        }
-
-        let range = BlockRange {
-            start: Some(BlockId {
-                height: start as u64,
-                hash: vec![],
-            }),
-            end: Some(BlockId {
-                height: end as u64,
-                hash: vec![],
-            }),
-            spam_filter_threshold: 0,
-        };
-        let mut report_timer = tokio::time::interval(std::time::Duration::from_secs(15));
-
-        let mut blocks = client
-            .get_block_range(Request::new(range))
-            .await?
-            .into_inner();
-        let mut h = 0u32;
-        let state = self.state.lock().await;
-        let mut wtxn = state.env.write_txn()?;
-        // Database can outlive the wtxn in lmdb
-        let blocks_table: Database<U32<BE>, Bytes> = state.env.create_database(&mut wtxn, None)?;
-        loop {
-            tokio::select! {
-                block = blocks.message() => {
-                    if let Some(block) = block? {
-                        h = block.height as u32;
-                        if h % 100_000 == 0 { info!("Syncing block @{h}"); }
-                        blocks_table.put(&mut wtxn, &h, block.encode_to_vec().as_slice())?;
-                    }
-                    else {
-                        break;
-                    }
-                }
-                _ = report_timer.tick() => {
-                    info!("Checkpoint @{h}");
-                    wtxn.commit()?;
-                    wtxn = state.env.write_txn()?;
-                }
-            }
-        }
-        wtxn.commit()?;
-
-        Ok(())
+        state.sync().await
     }
 }
 
@@ -406,7 +422,10 @@ impl CompactTxStreamer for LightwalletD {
         let request: Vec<_> = request.try_collect().await?;
         let request = tokio_stream::iter(request);
         let req = Request::new(request);
-        let mut client = self.client().await.map_err(|e| Status::internal(e.to_string()))?;
+        let mut client = self
+            .client()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
         let rep = client.get_taddress_balance_stream(req).await?;
         Ok(rep)
     }
@@ -503,7 +522,6 @@ pub async fn start_server() -> Result<()> {
     let c = config();
     let addr = format!("{}:{}", c.bind_address, c.port).parse()?;
     let lwd = LightwalletD::new().await?;
-    lwd.sync().await?;
 
     info!("GreeterServer listening on {}", addr);
 
