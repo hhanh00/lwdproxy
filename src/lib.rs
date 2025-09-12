@@ -8,7 +8,6 @@ pub mod api;
 pub mod rpc;
 pub mod db;
 pub mod server;
-mod frb_generated;
 
 pub type Client = CompactTxStreamerClient<Channel>;
 pub use api::config::Config;
