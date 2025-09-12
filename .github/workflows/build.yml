@@ -31,6 +31,7 @@ jobs:
           if [[ "${{ inputs.runner }}" == *windows* ]]; then EXT=".exe"; fi
           mv target/release/lwdproxy_rs$EXT lwdproxy_rs.${{ inputs.ext }}$EXT
           echo "PKG_PATH=$PWD/lwdproxy_rs.${{ inputs.ext }}$EXT " >> $GITHUB_OUTPUT
+          ls
       - name: Upload bin artifact
         if: "!startsWith(github.ref_name, 'lwdproxy-v')"
         uses: actions/upload-artifact@v4
