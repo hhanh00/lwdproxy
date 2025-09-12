@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/hhanh00/lwdproxy/compare/lwdproxy_rs-v0.1.2...lwdproxy_rs-v0.1.3) (2025-09-12)
+
+
+### Bug Fixes
+
+* missing app.json in release ([b6603e2](https://github.com/hhanh00/lwdproxy/commit/b6603e2b2cd2198f28b293c130e5e0416595841e))
+
 ## [0.1.2](https://github.com/hhanh00/lwdproxy/compare/lwdproxy_rs-v0.1.1...lwdproxy_rs-v0.1.2) (2025-09-12)
 
 
