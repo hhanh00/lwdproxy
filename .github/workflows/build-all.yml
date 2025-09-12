@@ -1,6 +1,7 @@
 name: Build and Release All Platforms
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - lwdproxy-v*
