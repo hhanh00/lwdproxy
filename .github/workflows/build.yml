@@ -22,18 +22,14 @@ jobs:
           echo "/root/.cargo/bin" >> $GITHUB_PATH
       - name: Build
         run: |
-          cargo build --release --message-format=json
-            | jq -r 'select(.reason=="compiler-artifact")
-            | select(.executable != null)
-            | .executable'
+          cargo build --release
       - name: Rename bin package
         id: package
         run: |
           EXT=""
           if [[ "${{ inputs.runner }}" == *windows* ]]; then EXT=".exe"; fi
-
           mv target/release/lwdproxy_rs$EXT lwdproxy_rs.${{ inputs.ext }}$EXT
-          echo "PKG_PATH=$PWD/lwdproxy_rs.${{ inputs.ext }}$EXT" >> $GITHUB_OUTPUT
+          echo "PKG_PATH=$PWD/lwdproxy_rs.${{ inputs.ext }}$EXT " >> $GITHUB_OUTPUT
       - name: Upload bin artifact
         if: "!startsWith(github.ref_name, 'lwdproxy-v')"
         uses: actions/upload-artifact@v4
