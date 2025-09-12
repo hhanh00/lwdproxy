@@ -35,9 +35,7 @@ server downloads blocks. `tls` activates TLS. Then you need to provide the
 public CERT in `cert_path` (it should be a full chain PEM). And finally,
 `key_path` gives the path to the private key.
 
-::: tip
-You can save a lot of time and disk space by using a min_height > 0.
-But be sure that your wallets are created *after* this height.
-:::
+> 💡 **Tip:** You can save a lot of time and disk space by using a min_height > 0.
+> But be sure that your wallets are created *after* this height.
 
 A complete installation takes ~20 GB of disk space at this time (Block Height 3 M).
