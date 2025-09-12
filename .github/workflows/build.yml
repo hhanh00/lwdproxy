@@ -29,6 +29,15 @@ jobs:
           mv target/release/lwdproxy_rs lwdproxy_rs.${{ inputs.ext }}
           echo "PKG_PATH=$PWD/lwdproxy_rs.${{ inputs.ext }}" >> $GITHUB_OUTPUT
       - name: Upload bin artifact
+        if: !startsWith(github.ref_name, 'lwdproxy-v')
         uses: actions/upload-artifact@v4
         with:
+          name: lwdproxy_rs_${{ inputs.ext }}
           path: ${{ steps.package.outputs.PKG_PATH }}
+      - name: Create Release
+        if: startsWith(github.ref_name, 'lwdproxy-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.PKG_PATH }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
