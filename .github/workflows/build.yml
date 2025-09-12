@@ -1,0 +1,34 @@
+name: Dynamic runner workflow
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "Runner to use"
+        type: string
+        required: true
+      ext:
+        description: "File extension"
+        type: string
+        required: true
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Setup PATH
+        run: |
+          echo "/root/.cargo/bin" >> $GITHUB_PATH
+      - name: Build
+        run: |
+          cargo build --release
+      - name: Rename bin package
+        id: package
+        run: |
+          mv target/release/lwdproxy_rs lwdproxy_rs.${{ inputs.ext }}
+          echo "PKG_PATH=$PWD/lwdproxy_rs.${{ inputs.ext }}" >> $GITHUB_OUTPUT
+      - name: Upload bin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{ steps.package.outputs.PKG_PATH }}

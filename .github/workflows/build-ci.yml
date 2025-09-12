@@ -18,25 +18,18 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup PATH
         run: |
-          echo "/flutter/bin" >> $GITHUB_PATH
-          echo "/root/.pub-cache/bin" >> $GITHUB_PATH
           echo "/root/.cargo/bin" >> $GITHUB_PATH
       - name: Build
         run: |
-          cargo version
-          fastforge package --platform=linux --targets=deb
+          cargo build --release
         env:
           RUSTUP_HOME: /root/.rustup
-      - name: Rename deb package
+      - name: Rename bin package
         id: package
         run: |
-          PKG_PATH=$(find dist/ -type f -name '*.deb' | head -n 1)
-          echo "Found package: $PKG_PATH"
-          mv $PKG_PATH .
-          BASENAME=$(basename $PKG_PATH ".deb")
-          mv $BASENAME.deb $BASENAME-arm64.deb
-          echo "PKG_PATH=$BASENAME-arm64.deb" >> $GITHUB_OUTPUT
-      - name: Upload deb artifact
+          mv target/release/lwdproxy_rs lwdproxy_rs
+          echo "PKG_PATH=$PWD/lwdproxy_rs" >> $GITHUB_OUTPUT
+      - name: Upload bin artifact
         uses: actions/upload-artifact@v4
         with:
           path: ${{ steps.package.outputs.PKG_PATH }}

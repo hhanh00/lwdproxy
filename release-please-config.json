@@ -1,7 +1,7 @@
 {
   "packages": {
     ".": {
-      "release-type": "dart",
+      "release-type": "rust",
       "changelog-path": "CHANGELOG.md"
     }
   },
