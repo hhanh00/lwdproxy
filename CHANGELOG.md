@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/hhanh00/lwdproxy/compare/lwdproxy_rs-v0.1.1...lwdproxy_rs-v0.1.2) (2025-09-12)
+
+
+### Bug Fixes
+
+* build-all script ([5803c73](https://github.com/hhanh00/lwdproxy/commit/5803c73e79ba1161cc5755e4855df9814987d5e1))
+* release build script ([63b0a30](https://github.com/hhanh00/lwdproxy/commit/63b0a30b9e10b592684a5a7512ef584c866e5eb7))
+
 ## [0.1.1](https://github.com/hhanh00/lwdproxy/compare/lwdproxy_rs-v0.1.0...lwdproxy_rs-v0.1.1) (2025-09-12)
 
 
