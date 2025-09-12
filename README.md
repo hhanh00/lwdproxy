@@ -38,4 +38,7 @@ public CERT in `cert_path` (it should be a full chain PEM). And finally,
 > 💡 **Tip:** You can save a lot of time and disk space by using a min_height > 0.
 > But be sure that your wallets are created *after* this height.
 
-A complete installation takes ~20 GB of disk space at this time (Block Height 3 M).
+A complete installation takes ~20 GB of disk space at this time (Block Height 3
+M), and about 1 hour. This is significantly less than deploying a full node.
+However, lwdproxy does not perform any validation. However, it is not worse than
+connecting to a lightwalletd.
