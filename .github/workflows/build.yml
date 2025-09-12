@@ -23,8 +23,6 @@ jobs:
       - name: Build
         run: |
           cargo build --release
-        env:
-          RUSTUP_HOME: /root/.rustup
       - name: Rename bin package
         id: package
         run: |
