@@ -1,8 +1,8 @@
 use anyhow::Result;
 use figment::{providers::{Format as _, Json}, Figment};
-use lfrb::{api::init::{init_app, set_config}, config::Config, server::start_server};
+use lwdproxy::{api::init::{init_app, set_config}, config::Config, server::start_server};
 use tracing::info;
-use lfrb::api::init::CONFIG;
+use lwdproxy::api::init::CONFIG;
 
 #[tokio::main]
 async fn main() -> Result<()> {
