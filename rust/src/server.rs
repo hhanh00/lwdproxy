@@ -86,7 +86,7 @@ impl LightwalletDState {
     pub async fn rewind(&self) -> Result<()> {
         let mut wtxn = self.env.write_txn()?;
         let blocks_table: Database<U32<BE>, Bytes> = self.env.create_database(&mut wtxn, None)?;
-        if let Some((last, _)) = blocks_table.last(&mut wtxn)? {
+        if let Some((last, _)) = blocks_table.last(&wtxn)? {
             // drop last 100 blocks, a reorg will never be longer than that
             let height = last.saturating_sub(100);
             blocks_table.delete_range(&mut wtxn, &(height..=last))?;
@@ -508,35 +508,35 @@ impl CompactTxStreamer for LightwalletD {
     }
     /// Return information about this lightwalletd instance and the blockchain
     async fn get_lightd_info(&self, request: Request<Empty>) -> GRPCResult<Response<LightdInfo>> {
-        let sapling_activation_height: u64 = Network::MainNetwork
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap()
-            .into();
-        let consensus_branch_id: u32 = BranchId::Nu6.into();
-        let env = env!(self);
-        let (blocks_table, rtxn) = rtxn!(env);
-        let latest_height = blocks_table
-            .last(&rtxn)
-            .map_err(into_status)?
-            .map(|(h, _)| h)
-            .unwrap_or_default();
-        let info = LightdInfo {
-            version: "LWD Proxy 1.0.0".to_string(),
-            vendor: "hanh".to_string(),
-            taddr_support: true,
-            chain_name: "main".to_string(),
-            sapling_activation_height,
-            consensus_branch_id: hex::encode(consensus_branch_id.to_le_bytes()),
-            block_height: latest_height as u64,
-            git_commit: "".to_string(),
-            branch: "".to_string(),
-            estimated_height: latest_height as u64,
-            build_date: "".to_string(),
-            build_user: "".to_string(),
-            zcashd_build: "".to_string(),
-            zcashd_subversion: "".to_string(),
+        let info = async {
+            let sapling_activation_height: u64 = Network::MainNetwork
+                .activation_height(NetworkUpgrade::Sapling)
+                .unwrap()
+                .into();
+            let consensus_branch_id: u32 = BranchId::Nu6.into();
+            let latest_height = {
+                let env = env!(self);
+                let (blocks_table, rtxn) = rtxn!(env);
+                blocks_table
+                    .last(&rtxn)
+                    .map_err(into_status)?
+                    .map(|(h, _)| h)
+                    .unwrap_or_default()
+            };
+            let mut client = self.client().await?;
+            let origin_info = client.get_lightd_info(request).await?.into_inner();
+
+            let info = LightdInfo {
+                version: "LWD Proxy 1.0.0".to_string(),
+                vendor: "hanh".to_string(),
+                block_height: latest_height as u64,
+                ..origin_info
+            };
+            Ok::<_, anyhow::Error>(info)
         };
-        Ok(Response::new(info))
+        Ok(Response::new(
+            info.await.map_err(|e| into_status(e.root_cause()))?,
+        ))
     }
     /// Testing-only, requires lightwalletd --ping-very-insecure (do not enable in production)
     async fn ping(&self, request: Request<Duration>) -> GRPCResult<Response<PingResponse>> {
