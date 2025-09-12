@@ -32,7 +32,7 @@ jobs:
     needs: build
     steps:
       - name: Upload config file
-        if: startsWith(github.ref_name, 'lwdproxy-v')
+        if: startsWith(github.ref_name, 'lwdproxy_rs-v')
         uses: softprops/action-gh-release@v2
         with:
           files: App.json
