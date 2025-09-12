@@ -1,6 +1,6 @@
 name: Dynamic runner workflow
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       runner:
         description: "Runner to use"
