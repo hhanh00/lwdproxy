@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/hhanh00/lwdproxy/compare/lwdproxy_rs-v0.1.0...lwdproxy_rs-v0.1.1) (2025-09-12)
+
+
+### Bug Fixes
+
+* release trigger ([fbe24ff](https://github.com/hhanh00/lwdproxy/commit/fbe24ff25e4388cc59a82c482e978f687d45f238))
+
 ## 0.1.0 (2025-09-12)
 
 
