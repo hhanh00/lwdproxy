@@ -12,6 +12,7 @@ class Config {
   final String bindAddress;
   final int port;
   final int minHeight;
+  final bool tls;
   final String certPath;
   final String keyPath;
 
@@ -21,6 +22,7 @@ class Config {
     required this.bindAddress,
     required this.port,
     required this.minHeight,
+    required this.tls,
     required this.certPath,
     required this.keyPath,
   });
@@ -32,6 +34,7 @@ class Config {
       bindAddress.hashCode ^
       port.hashCode ^
       minHeight.hashCode ^
+      tls.hashCode ^
       certPath.hashCode ^
       keyPath.hashCode;
 
@@ -45,6 +48,7 @@ class Config {
           bindAddress == other.bindAddress &&
           port == other.port &&
           minHeight == other.minHeight &&
+          tls == other.tls &&
           certPath == other.certPath &&
           keyPath == other.keyPath;
 }

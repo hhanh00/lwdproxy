@@ -27,7 +27,10 @@ use crate::{
     Client, SyncError,
 };
 
-macro_rules! env {
+const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+macro_rules! dbenv {
     ($self:ident) => {{
         let state = $self.state.lock().await;
         state.env.clone()
@@ -348,7 +351,7 @@ macro_rules! forward_stream {
 impl CompactTxStreamer for LightwalletD {
     /// Return the height of the tip of the best chain
     async fn get_latest_block(&self, request: Request<ChainSpec>) -> GRPCResult<Response<BlockId>> {
-        let env = env!(self);
+        let env = dbenv!(self);
         let (blocks_table, rtxn) = rtxn!(env);
         let last_block = blocks_table
             .last(&rtxn)
@@ -367,7 +370,7 @@ impl CompactTxStreamer for LightwalletD {
     /// Return the compact block corresponding to the given block identifier
     async fn get_block(&self, request: Request<BlockId>) -> GRPCResult<Response<CompactBlock>> {
         let request = request.into_inner();
-        let env = env!(self);
+        let env = dbenv!(self);
         let (blocks_table, rtxn) = rtxn!(env);
         let block_data = blocks_table
             .get(&rtxn, &(request.height as u32))
@@ -395,7 +398,7 @@ impl CompactTxStreamer for LightwalletD {
         let end = end.height as u32;
 
         let (tx, rx) = tokio::sync::mpsc::channel::<GRPCResult<CompactBlock>>(4);
-        let env = env!(self);
+        let env = dbenv!(self);
         let tx_job = self.tx_job.clone();
         tokio::spawn(async move {
             let job = RangeJob {
@@ -515,7 +518,7 @@ impl CompactTxStreamer for LightwalletD {
                 .into();
             let consensus_branch_id: u32 = BranchId::Nu6.into();
             let latest_height = {
-                let env = env!(self);
+                let env = dbenv!(self);
                 let (blocks_table, rtxn) = rtxn!(env);
                 blocks_table
                     .last(&rtxn)
@@ -527,8 +530,8 @@ impl CompactTxStreamer for LightwalletD {
             let origin_info = client.get_lightd_info(request).await?.into_inner();
 
             let info = LightdInfo {
-                version: "LWD Proxy 1.0.0".to_string(),
-                vendor: "hanh".to_string(),
+                version: PKG_VERSION.to_string(),
+                vendor: PKG_NAME.to_string(),
                 block_height: latest_height as u64,
                 ..origin_info
             };
@@ -546,12 +549,15 @@ impl CompactTxStreamer for LightwalletD {
 
 pub async fn start_server() -> Result<()> {
     let c = config();
-    let cert_path = &c.cert_path;
-    let key_path = &c.key_path;
-    let cert = tokio::fs::read(cert_path).await?;
-    let key = tokio::fs::read(key_path).await?;
-    let identity = Identity::from_pem(cert, key);
-    let tls_config = ServerTlsConfig::new().identity(identity);
+    let mut builder = Server::builder();
+    if c.tls {
+        let cert_path = &c.cert_path;
+        let key_path = &c.key_path;
+        let cert = tokio::fs::read(cert_path).await?;
+        let key = tokio::fs::read(key_path).await?;
+        let identity = Identity::from_pem(cert, key);
+        builder = builder.tls_config(ServerTlsConfig::new().identity(identity))?;
+    }
 
     let addr = format!("{}:{}", c.bind_address, c.port).parse()?;
     let lwd = LightwalletD::build().await?;
@@ -561,8 +567,7 @@ pub async fn start_server() -> Result<()> {
     let local = LocalSet::new();
     local
         .run_until(async move {
-            Server::builder()
-                .tls_config(tls_config)?
+            builder
                 .add_service(CompactTxStreamerServer::new(lwd))
                 .serve(addr)
                 .await

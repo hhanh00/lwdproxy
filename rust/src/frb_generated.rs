@@ -203,6 +203,13 @@ impl SseDecode for String {
     }
 }
 
+impl SseDecode for bool {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_u8().unwrap() != 0
+    }
+}
+
 impl SseDecode for crate::config::Config {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -211,6 +218,7 @@ impl SseDecode for crate::config::Config {
         let mut var_bindAddress = <String>::sse_decode(deserializer);
         let mut var_port = <u16>::sse_decode(deserializer);
         let mut var_minHeight = <u32>::sse_decode(deserializer);
+        let mut var_tls = <bool>::sse_decode(deserializer);
         let mut var_certPath = <String>::sse_decode(deserializer);
         let mut var_keyPath = <String>::sse_decode(deserializer);
         return crate::config::Config {
@@ -219,6 +227,7 @@ impl SseDecode for crate::config::Config {
             bind_address: var_bindAddress,
             port: var_port,
             min_height: var_minHeight,
+            tls: var_tls,
             cert_path: var_certPath,
             key_path: var_keyPath,
         };
@@ -282,13 +291,6 @@ impl SseDecode for i32 {
     }
 }
 
-impl SseDecode for bool {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        deserializer.cursor.read_u8().unwrap() != 0
-    }
-}
-
 fn pde_ffi_dispatcher_primary_impl(
     func_id: i32,
     port: flutter_rust_bridge::for_generated::MessagePort,
@@ -329,6 +331,7 @@ impl flutter_rust_bridge::IntoDart for crate::config::Config {
             self.bind_address.into_into_dart().into_dart(),
             self.port.into_into_dart().into_dart(),
             self.min_height.into_into_dart().into_dart(),
+            self.tls.into_into_dart().into_dart(),
             self.cert_path.into_into_dart().into_dart(),
             self.key_path.into_into_dart().into_dart(),
         ]
@@ -356,6 +359,13 @@ impl SseEncode for String {
     }
 }
 
+impl SseEncode for bool {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_u8(self as _).unwrap();
+    }
+}
+
 impl SseEncode for crate::config::Config {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -364,6 +374,7 @@ impl SseEncode for crate::config::Config {
         <String>::sse_encode(self.bind_address, serializer);
         <u16>::sse_encode(self.port, serializer);
         <u32>::sse_encode(self.min_height, serializer);
+        <bool>::sse_encode(self.tls, serializer);
         <String>::sse_encode(self.cert_path, serializer);
         <String>::sse_encode(self.key_path, serializer);
     }
@@ -419,13 +430,6 @@ impl SseEncode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_i32::<NativeEndian>(self).unwrap();
-    }
-}
-
-impl SseEncode for bool {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        serializer.cursor.write_u8(self as _).unwrap();
     }
 }
 

@@ -219,6 +219,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool dco_decode_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
   Config dco_decode_box_autoadd_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_config(raw);
@@ -228,16 +234,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Config dco_decode_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return Config(
       dbPath: dco_decode_String(arr[0]),
       origin: dco_decode_list_String(arr[1]),
       bindAddress: dco_decode_String(arr[2]),
       port: dco_decode_u_16(arr[3]),
       minHeight: dco_decode_u_32(arr[4]),
-      certPath: dco_decode_String(arr[5]),
-      keyPath: dco_decode_String(arr[6]),
+      tls: dco_decode_bool(arr[5]),
+      certPath: dco_decode_String(arr[6]),
+      keyPath: dco_decode_String(arr[7]),
     );
   }
 
@@ -292,6 +299,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool sse_decode_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint8() != 0;
+  }
+
+  @protected
   Config sse_decode_box_autoadd_config(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_config(deserializer));
@@ -305,6 +318,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_bindAddress = sse_decode_String(deserializer);
     var var_port = sse_decode_u_16(deserializer);
     var var_minHeight = sse_decode_u_32(deserializer);
+    var var_tls = sse_decode_bool(deserializer);
     var var_certPath = sse_decode_String(deserializer);
     var var_keyPath = sse_decode_String(deserializer);
     return Config(
@@ -313,6 +327,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       bindAddress: var_bindAddress,
       port: var_port,
       minHeight: var_minHeight,
+      tls: var_tls,
       certPath: var_certPath,
       keyPath: var_keyPath,
     );
@@ -367,12 +382,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  bool sse_decode_bool(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getUint8() != 0;
-  }
-
-  @protected
   void sse_encode_AnyhowException(
     AnyhowException self,
     SseSerializer serializer,
@@ -385,6 +394,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_String(String self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
+  }
+
+  @protected
+  void sse_encode_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint8(self ? 1 : 0);
   }
 
   @protected
@@ -401,6 +416,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.bindAddress, serializer);
     sse_encode_u_16(self.port, serializer);
     sse_encode_u_32(self.minHeight, serializer);
+    sse_encode_bool(self.tls, serializer);
     sse_encode_String(self.certPath, serializer);
     sse_encode_String(self.keyPath, serializer);
   }
@@ -451,11 +467,5 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_i_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putInt32(self);
-  }
-
-  @protected
-  void sse_encode_bool(bool self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putUint8(self ? 1 : 0);
   }
 }
