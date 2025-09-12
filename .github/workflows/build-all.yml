@@ -1,0 +1,27 @@
+name: Build and Release All Platforms
+
+on:
+  push:
+    tags:
+      - lwdproxy-v*
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            ext: x86_64
+          - runner: ubuntu-latest-arm
+            ext: aarch64
+          - runner: windows-latest
+            ext: win
+          - runner: macos-latest
+            ext: macos
+    uses: ./.github/workflows/build.yml
+    with:
+      runner: ${{ matrix.runner }}
+      ext: ${{ matrix.ext }}

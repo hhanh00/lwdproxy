@@ -1,18 +1,19 @@
-name: Build and Release Linux Debian Package on ARM64
-
+name: Dynamic runner workflow
 on:
   workflow_dispatch:
-  workflow_call:
+    inputs:
+      runner:
+        description: "Runner to use"
+        type: string
+        required: true
+      ext:
+        description: "File extension"
+        type: string
+        required: true
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-24.04-arm
-    container:
-      image: ghcr.io/${{ github.repository_owner }}/zkool-ci-image:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
+  build:
+    runs-on: ${{ github.event.inputs.runner }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -27,8 +28,8 @@ jobs:
       - name: Rename bin package
         id: package
         run: |
-          mv target/release/lwdproxy_rs lwdproxy_rs
-          echo "PKG_PATH=$PWD/lwdproxy_rs" >> $GITHUB_OUTPUT
+          mv target/release/lwdproxy_rs lwdproxy_rs.${{ github.event.inputs.ext }}
+          echo "PKG_PATH=$PWD/lwdproxy_rs.${{ github.event.inputs.ext }}" >> $GITHUB_OUTPUT
       - name: Upload bin artifact
         uses: actions/upload-artifact@v4
         with:

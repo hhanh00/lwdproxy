@@ -14,7 +14,10 @@ jobs:
 
   build:
     if: "!contains(github.head_ref, 'release-please--')"
-    uses: ./.github/workflows/build-ci.yml
+    uses: ./.github/workflows/build.yml
     secrets: inherit
     permissions:
       contents: write
+    with:
+      runner: ubuntu-latest
+      ext: x86_64
