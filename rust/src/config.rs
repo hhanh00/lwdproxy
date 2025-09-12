@@ -7,6 +7,7 @@ pub struct Config {
     pub bind_address: String,
     pub port: u16,
     pub min_height: u32,
+    pub tls: bool,
     pub cert_path: String,
     pub key_path: String,
 }
