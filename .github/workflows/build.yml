@@ -25,6 +25,7 @@ jobs:
           cargo build --release
       - name: Rename bin package
         id: package
+        shell: bash
         run: |
           EXT=""
           if [[ "${{ inputs.runner }}" == *windows* ]]; then EXT=".exe"; fi
