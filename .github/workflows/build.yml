@@ -13,7 +13,7 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ github.event.inputs.runner }}
+    runs-on: ${{ inputs.runner }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -28,8 +28,8 @@ jobs:
       - name: Rename bin package
         id: package
         run: |
-          mv target/release/lwdproxy_rs lwdproxy_rs.${{ github.event.inputs.ext }}
-          echo "PKG_PATH=$PWD/lwdproxy_rs.${{ github.event.inputs.ext }}" >> $GITHUB_OUTPUT
+          mv target/release/lwdproxy_rs lwdproxy_rs.${{ inputs.ext }}
+          echo "PKG_PATH=$PWD/lwdproxy_rs.${{ inputs.ext }}" >> $GITHUB_OUTPUT
       - name: Upload bin artifact
         uses: actions/upload-artifact@v4
         with:
