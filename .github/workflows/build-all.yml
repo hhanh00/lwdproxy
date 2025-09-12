@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - lwdproxy-v*
+      - lwdproxy_rs-v*
 
 permissions:
   contents: write
