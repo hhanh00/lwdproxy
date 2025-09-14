@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/hhanh00/lwdproxy/compare/lwdproxy_rs-v0.1.3...lwdproxy_rs-v0.1.4) (2025-09-14)
+
+
+### Bug Fixes
+
+* do not exit sync loop on error ([#21](https://github.com/hhanh00/lwdproxy/issues/21)) ([4167594](https://github.com/hhanh00/lwdproxy/commit/4167594f252f6ea10e8a1c2e78e6ca5639738630))
+
 ## [0.1.3](https://github.com/hhanh00/lwdproxy/compare/lwdproxy_rs-v0.1.2...lwdproxy_rs-v0.1.3) (2025-09-12)
 
 
