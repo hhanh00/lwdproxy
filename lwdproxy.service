@@ -1,0 +1,14 @@
+# /etc/systemd/system/lwdproxy_rs.service
+[Unit]
+Description=Lightwalletd Proxy
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/lwdproxy_rs
+Restart=on-failure
+#User=myuser
+#Group=myuser
+#WorkingDirectory=/home/myuser
+
+[Install]
+WantedBy=multi-user.target
