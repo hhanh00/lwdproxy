@@ -1,15 +1,12 @@
 use std::sync::OnceLock;
 
-use flutter_rust_bridge::frb;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{fmt::{self, format::FmtSpan}, layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter, Layer, Registry};
 
 use crate::Config;
 
-#[frb(init)]
 pub fn init_app() {
     // Default utilities - feel free to customize
-    flutter_rust_bridge::setup_default_user_utils();
     let _ = env_logger::builder().try_init();
     let _ = Registry::default()
         .with(default_layer())

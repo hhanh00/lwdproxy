@@ -14,7 +14,7 @@ use tonic::{
     transport::{Channel, ClientTlsConfig, Endpoint, Identity, Server, ServerTlsConfig},
     Request, Response, Status, Streaming,
 };
-use tracing::info;
+use tracing::{error, info};
 use zcash_protocol::consensus::{BranchId, Network, NetworkUpgrade, Parameters};
 
 use crate::{
@@ -187,12 +187,12 @@ impl LightwalletDState {
         Ok(())
     }
 
-    pub fn run(&self) -> Result<()> {
+    pub fn run(&self) {
         let state = self.clone();
         tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
             loop {
                 let runtime = Builder::new_current_thread().enable_time().build().unwrap();
-                runtime.block_on(async {
+                if let Err(e) = runtime.block_on(async {
                     let result = state.sync().await;
                     match result {
                         Ok(r) => Ok(()),
@@ -201,11 +201,12 @@ impl LightwalletDState {
                         Err(SyncError::Tonic(e)) => Err(anyhow::Error::new(e)),
                         Err(SyncError::Other(e)) => Err(e),
                     }
-                })?;
+                }) {
+                    error!("{e}");
+                }
                 std::thread::sleep(std::time::Duration::from_secs(15));
             }
         });
-        Ok(())
     }
 }
 
@@ -268,7 +269,7 @@ impl LightwalletD {
             Ok::<_, anyhow::Error>(())
         });
 
-        state.run()?; // Run the autosync task
+        state.run(); // Run the autosync task
 
         Ok(Self {
             state: Mutex::new(state),

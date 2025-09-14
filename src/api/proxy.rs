@@ -1,11 +1,9 @@
 use anyhow::Result;
 use figment::{providers::{Format as _, Json}, Figment};
-use flutter_rust_bridge::frb;
 use tracing::info;
 
 use crate::{api::init::{set_config, CONFIG}, Config, server::start_server};
 
-#[frb(sync)]
 pub fn get_default_config() -> Result<Config> {
     let figment = Figment::new()
         .join(Json::file("App.json"));
@@ -13,7 +11,6 @@ pub fn get_default_config() -> Result<Config> {
     Ok(config)
 }
 
-#[frb]
 pub async fn start_proxy(config: &Config) -> Result<()> {
     set_config(config.clone());
     tokio::task::spawn_blocking(move || {
