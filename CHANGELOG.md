@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/hhanh00/lwdproxy/compare/lwdproxy_rs-v0.1.4...lwdproxy_rs-v0.2.0) (2025-09-18)
+
+
+### Features
+
+* add support for testnet ([#23](https://github.com/hhanh00/lwdproxy/issues/23)) ([e4900fc](https://github.com/hhanh00/lwdproxy/commit/e4900fc08189e0b8387db4a36adc79a46a85979c))
+
 ## [0.1.4](https://github.com/hhanh00/lwdproxy/compare/lwdproxy_rs-v0.1.3...lwdproxy_rs-v0.1.4) (2025-09-14)
 
 
