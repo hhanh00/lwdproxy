@@ -56,7 +56,7 @@ pub struct LightwalletDState {
 }
 
 impl LightwalletDState {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(network: Network) -> Result<Self> {
         let c = config();
         // db connection
         let env = unsafe {
@@ -79,7 +79,7 @@ impl LightwalletDState {
         let channel = Channel::balance_list(endpoints.into_iter());
 
         let state = LightwalletDState {
-            network: Network::MainNetwork,
+            network,
             env,
             channel,
         };
@@ -216,10 +216,10 @@ pub struct LightwalletD {
 }
 
 impl LightwalletD {
-    pub async fn build() -> Result<Self> {
+    pub async fn build(network: Network) -> Result<Self> {
         const CONCURRENT_RANGE_JOBS: usize = 16;
 
-        let state = LightwalletDState::new().await?;
+        let state = LightwalletDState::new(network).await?;
         let mut tx_child_jobs = vec![];
         for i in 0..CONCURRENT_RANGE_JOBS {
             let (tx_child_job, mut rx_child_job) = mpsc::channel::<RangeJob>(4);
@@ -320,18 +320,24 @@ macro_rules! forward {
     }};
 }
 
-pub async fn forward_stream<T, R>(
+pub async fn forward_stream<T: Send + 'static, R: Send + 'static>(
     lwd: &LightwalletD,
     request: Request<T>,
-    f: impl AsyncFnOnce(Client, Request<T>) -> Result<Response<Streaming<R>>>,
+    f: impl AsyncFnOnce(Client, Request<T>) -> Result<Response<Streaming<R>>> + std::marker::Send + 'static,
 ) -> GRPCResult<Response<ReceiverStream<GRPCResult<R>>>> {
+    let client = lwd.client().await.unwrap();
     let rx = async move {
         let (tx, rx) = tokio::sync::mpsc::channel::<GRPCResult<R>>(4);
-        let client = lwd.client().await?;
-        let mut rep = f(client, request).await?.into_inner();
-        while let Some(rtx) = rep.message().await? {
-            let _ = tx.send(Ok(rtx)).await;
-        }
+        tokio::task::spawn_blocking(|| {
+            let runtime = Builder::new_current_thread().enable_time().build().unwrap();
+            runtime.block_on(async move {
+                let mut rep = f(client, request).await?.into_inner();
+                while let Some(rtx) = rep.message().await? {
+                    let _ = tx.send(Ok(rtx)).await;
+                }
+                Ok::<_, anyhow::Error>(())
+            })
+        });
         Ok::<_, anyhow::Error>(rx)
     };
     let rx = rx.await.map_err(|e| into_status(e.root_cause()))?;
@@ -561,9 +567,14 @@ pub async fn start_server() -> Result<()> {
     }
 
     let addr = format!("{}:{}", c.bind_address, c.port).parse()?;
-    let lwd = LightwalletD::build().await?;
+    let network = if c.main_network {
+        Network::MainNetwork
+    } else {
+        Network::TestNetwork
+    };
+    let lwd = LightwalletD::build(network).await?;
 
-    info!("GreeterServer listening on {}", addr);
+    info!("LWD Proxy listening on {}", addr);
 
     let local = LocalSet::new();
     local

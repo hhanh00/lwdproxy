@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 #[derive(Clone, Deserialize, Debug, Default)]
 pub struct Config {
+    pub main_network: bool,
     pub db_path: String,
     pub origin: Vec<String>,
     pub bind_address: String,
