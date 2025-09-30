@@ -1,5 +1,7 @@
 #![allow(unused_variables)]
 
+use std::future::Future;
+
 use anyhow::Result;
 use futures_util::TryStreamExt as _;
 use heed::{byteorder::BE, types::*, Database, Env, EnvOpenOptions};
@@ -167,7 +169,7 @@ impl LightwalletDState {
                             }
                         }
                         prevhash = Some(block.hash.clone());
-                        if h % 100_000 == 0 { info!("Syncing block @{h}"); }
+                        if h.is_multiple_of(100_000) { info!("Syncing block @{h}"); }
                         blocks_table.put(&mut wtxn, &h, block.encode_to_vec().as_slice())?;
                     }
                     else {
@@ -290,6 +292,7 @@ fn into_status(e: impl std::error::Error) -> Status {
     Status::internal(e.to_string())
 }
 
+#[derive(Debug)]
 pub struct RangeJob {
     env: Env,
     start: u32,
@@ -320,23 +323,25 @@ macro_rules! forward {
     }};
 }
 
-pub async fn forward_stream<T: Send + 'static, R: Send + 'static>(
+pub async fn forward_stream<T: Send + 'static, R: Send + 'static, F, Fut>(
     lwd: &LightwalletD,
     request: Request<T>,
-    f: impl AsyncFnOnce(Client, Request<T>) -> Result<Response<Streaming<R>>> + std::marker::Send + 'static,
-) -> GRPCResult<Response<ReceiverStream<GRPCResult<R>>>> {
-    let client = lwd.client().await.unwrap();
+    f: F,
+) -> GRPCResult<Response<ReceiverStream<GRPCResult<R>>>>
+where
+    F: FnOnce(Client, Request<T>) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<Response<Streaming<R>>>> + Send + 'static,
+{
     let rx = async move {
         let (tx, rx) = tokio::sync::mpsc::channel::<GRPCResult<R>>(4);
-        tokio::task::spawn_blocking(|| {
-            let runtime = Builder::new_current_thread().enable_time().build().unwrap();
-            runtime.block_on(async move {
-                let mut rep = f(client, request).await?.into_inner();
-                while let Some(rtx) = rep.message().await? {
-                    let _ = tx.send(Ok(rtx)).await;
-                }
-                Ok::<_, anyhow::Error>(())
-            })
+        let client = lwd.client().await?;
+        let fut = f(client, request);
+        tokio::spawn(async move {
+            let mut rep = fut.await?.into_inner();
+            while let Some(rtx) = rep.message().await? {
+                let _ = tx.send(Ok(rtx)).await;
+            }
+            Ok::<_, anyhow::Error>(())
         });
         Ok::<_, anyhow::Error>(rx)
     };
